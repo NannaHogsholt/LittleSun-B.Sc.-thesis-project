@@ -1,0 +1,225 @@
+---
+title: "Sunlight at Trapholt"
+author: "Cordula Vesper"
+date: "2020"
+output: html_document
+---
+
+Date created: `r format(Sys.time(), '%d %B, %Y')`
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+rm(list = ls())
+
+pacman::p_load(tidyverse, lme4, lmerTest, lattice, gridExtra, vegan, RColorBrewer, patchwork, 
+               rjson, jsonlite, anytime, crqa, forecast, zoo, DescTools)
+
+echo_setting = FALSE
+
+experiment = 'trapholt'
+
+dataPath = 'trapholt_data/'
+figurePath = 'trapholt_figures/'
+resultsPath = 'trapholt_results/'
+
+savefig_toggle = 0
+reload_movement_data = 0
+
+sample_rate = 30
+```
+
+# Trapholt (Trapholt Museum, December 2019)
+
+## Notes
+The sample rate is 30 Hz. 
+
+
+## Post-experiment questionnaire
+
+```{r}
+# Overview file containing demographics, questionnaire data and the movement file IDs 
+trap <- read_delim(paste(dataPath, 'trapholt3.csv', sep=""), col_names=TRUE, delim=';')
+```
+
+```{r}
+pair2run = sort(unique(trap$pair)) #11:33 #c(10,12:28,30:33)
+
+```
+ 
+
+## Movement data
+
+```{r, echo=FALSE}
+# Reading movement data files
+if (reload_movement_data == 1) {
+  d = data.frame()
+  for (pairIdx in pair2run) {
+    
+    if (is.na(subset(trap, pair==pairIdx)[1,]$sunlight)) {
+      info <- rbind(subset(trap, pair==pairIdx), subset(trap, pair==pairIdx))
+    } else {
+      info <- rbind(subset(trap, pair==pairIdx & sunlight=="blue"), subset(trap, pair==pairIdx & sunlight=="red"))
+    }
+    
+    fileID2run <- c(info$mov_file_part1[1], info$mov_file_part2[1], info$mov_file_part3[1])
+    
+    info <- select(info, pair, cond, cond_label, subj, sunlight)
+    
+    for (fileID in fileID2run) {
+      
+      v <- fromJSON(paste(dataPath,fileID,'.json',sep=""), flatten=TRUE)
+      
+      # Further flattening into data frames
+      d_tmp <- data.frame()
+      for (s in 1:length(v$sources$id)) { # sort(v$sources$id)) { 
+        v_tmp <- v$sources$strokes[[s]]$points
+        if (!is_empty(v_tmp)) {
+          for (k in 1:length(v_tmp)) {
+            d_tmp <- rbind(d_tmp, data.frame(
+              info[s,], 'fileID'=fileID, 
+              #            'subj'=pairIdx*100+s, 'sunlight'=v$sources$id[s], 
+              'part'=match(fileID,fileID2run), 'part_label'=paste('Part',match(fileID,fileID2run)), 
+              'id'=v$sources$id[s], 's'=s, 'k'=k, 'o'=1:nrow(v_tmp[[k]]),
+              'x'=v_tmp[[k]]$p.x, 'y'=v_tmp[[k]]$p.y, 'timestamp'=v_tmp[[k]]$t
+            ))
+          }
+        }
+      }
+      
+      # Cleaning the weird steady value
+      d_tmp = d_tmp[d_tmp$x>-.8&d_tmp$y<.4,] 
+      
+      # Adjusting the date string
+      options(digits.secs=6) #as.POSIXlt(Sys.time(), "GMT")
+      d_tmp$timestamp <- as.POSIXct(d_tmp$timestamp/1000, origin='1970-01-01', tz="CET")
+      # d_tmp$t <- as.numeric(d_tmp$timestamp-d_tmp$timestamp[1]) # ERROR - YELLOW SEEMS TO START NEGATIVE !!!
+      
+      
+      # Aligning time vectors
+      white = data.frame(subset(d_tmp, id=='white'))
+      yellow = data.frame(subset(d_tmp, id=='yellow'))
+      
+      # white$t <- as.numeric(white$timestamp-white$timestamp[1])
+      # yellow$t <- as.numeric(yellow$timestamp-yellow$timestamp[1])
+      
+      white$t <- as.numeric(white$timestamp-min(white$timestamp[1],yellow$timestamp[1]))
+      yellow$t <- as.numeric(yellow$timestamp-min(white$timestamp[1],yellow$timestamp[1]))
+      
+      white$t = trunc(white$t*1000) 
+      yellow$t = trunc(yellow$t*1000)
+      tmp_w=round(white$t/34)
+      tmp_y=round(yellow$t/34)
+      
+      # Filling in NaNs for missing samples
+      max_sample = max(tmp_w,tmp_y) 
+      samples_w <- match(0:max_sample,tmp_w)
+      samples_y <- match(0:max_sample,tmp_y)
+      
+      white <- data.frame('pair'=white$pair[1],'cond'=white$cond[1],'cond_label'=white$cond_label[1],
+                          'fileID'=white$fileID[1],'part'=white$part[1],'part_label'=white$part_label[1],
+                          'subj'=white$subj[1],'sunlight'=white$sunlight[1],'id'=white$id[1],
+                          'timestamp'=white$timestamp[samples_w],'old_t'=white$t[samples_w],'t'=c(0:max_sample)*34,
+                          'x'=white$x[samples_w],'y'=white$y[samples_w])
+      yellow <- data.frame('pair'=yellow$pair[1],'cond'=yellow$cond[1],'cond_label'=yellow$cond_label[1],
+                           'fileID'=yellow$fileID[1],'part'=yellow$part[1],'part_label'=yellow$part_label[1],
+                           'subj'=yellow$subj[1],'sunlight'=yellow$sunlight[1],'id'=yellow$id[1],
+                           'timestamp'=yellow$timestamp[samples_y],'old_t'=yellow$t[samples_y],'t'=c(0:max_sample)*34,
+                           'x'=yellow$x[samples_y],'y'=yellow$y[samples_y])
+      
+      
+      print(paste('Successfully read file ', fileID, '.json.', 
+                  ' Type = ', v$metadata$type,
+                  '. Duration = ', v$metadata$duration,'s.', sep=""))
+      
+      d = rbind(d, white, yellow)
+    } 
+  }
+  
+  save(d, file='trapholt_rawdata_nanna.rda')
+  
+} else {
+  
+  load('trapholt_rawdata.rda')
+  print('Loaded trapholt_rawdata.rda')
+  
+}
+```
+
+```{r}
+# Setting factors
+d$pair = factor(d$pair)
+d$subj = factor(d$subj)
+d$cond = factor(d$cond)
+d$part = factor(d$part)
+```
+
+```{r}
+d_orig = d
+
+# Fill in missing data with interpolation function; also calculate general velocity
+d$new_x = NaN
+d$new_y = NaN
+d$v = NaN
+d$a = NaN
+d$zcrMin = NaN
+d$zcrMax = NaN
+
+pair2run = pair2run
+part2run = 1:3
+
+for (pairIdx in pair2run) {
+  for (partIdx in part2run) {
+    
+    d_plot = subset(d, pair==pairIdx & part==partIdx)
+    
+    # d_plot <- d_plot %>% mutate(t_bin = (floor(d_plot$t/100)*100)/1000) %>% group_by(pair,cond,id,t_bin) %>%
+    # summarize(t = mean(t_bin, na.rm = TRUE), x = mean(x, na.rm = TRUE), y = mean(y, na.rm = TRUE)) 
+    
+    d_plot$new_x = NaN
+    d_plot$new_y = NaN
+    d_plot$v = NaN
+    d_plot$a = NaN
+    d_plot$zcrMin = NaN
+    d_plot$zcrMax = NaN
+
+    for (idIdx in c('white','yellow')) {
+      
+      tmp = subset(d_plot, id==idIdx)
+      
+      x <- zoo(tmp$x, tmp$t)
+      x <- as.ts(x)
+      new_x <- na.interp(x)
+      d_plot$new_x[d_plot$id==idIdx] <- as.numeric(new_x)
+      
+      y <- zoo(tmp$y, tmp$t)
+      y <- as.ts(y)
+      new_y <- na.interp(y)
+      d_plot$new_y[d_plot$id==idIdx] <- as.numeric(new_y)
+      
+      d_plot$v[d_plot$id==idIdx] <- c(0, sqrt(diff(d_plot$new_x[d_plot$id==idIdx])^2 + diff(d_plot$new_y[d_plot$id==idIdx])^2) / 
+                                        diff(d_plot$t[d_plot$id==idIdx]) )
+      
+      d_plot$a <- c(0, diff(d_plot$v)/diff(d_plot$t))
+      
+      d_plot$zcrMin = c(d_plot$a[1:(length(d_plot$a)-1)]<=0 & d_plot$a[2:length(d_plot$a)]>0, 0)
+      d_plot$zcrMax = c(d_plot$a[1:(length(d_plot$a)-1)]>=0 & d_plot$a[2:length(d_plot$a)]<0, 0)
+      
+      # d_plot$zcr <- c(0, ifelse(d_plot[2:nrow(d_plot),]$a<=0 & d_plot[1:nrow(d_plot)-1,]$a>0,1,
+                                 # ifelse(d_plot[2:nrow(d_plot),]$a>=0 & d_plot[1:nrow(d_plot)-1,]$a<0,2,0)))
+      
+    }
+    
+    d[d$pair==pairIdx & d$part==partIdx,] <- d_plot
+    
+  }
+}
+
+d <- d %>% rename(old_x = x, old_y = y) %>% rename(x = new_x, y = new_y) %>% 
+  select(!c(timestamp, old_t, old_x, old_y))
+```
+
+```{r}
+save(d, d_orig, trap, file='trapholt_preprocessing_nanna.rda')
+print('trapholt_preprocessing_nanna.rda saved')
+```
