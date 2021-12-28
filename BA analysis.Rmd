@@ -1,0 +1,1043 @@
+---
+title: "Sunlight analysis"
+author: "Nanna Høgsholt"
+date: "2021"
+output: html_document
+---
+
+#This markdown contains a full analysis for BA thesis: 
+ 
+ You will be able to find:
+ - loading and pre-adjusting of data
+ - Visual explorations and variable checks
+ - Spatial explorations of x and y
+ - Velocity analysis
+ - Patterns within individual pairs 
+
+
+#Loading data
+```{r}
+pacman::p_load(tidyverse, dplyr, pastecs, ggpmisc, lme4, viridis, ggsci, rstatix, extrafont)
+
+#Base data
+load(file = "C:/Users/nanna/Aarhus Universitet/Cordula Vesper - Sunlight material for Nanna/data/preprocessing/trapholt_preprocessing_nanna.rda")
+
+#Merging interview data
+df <- merge(d,trap)
+
+
+#Loading stroke information
+load(file="C:/Users/nanna/Aarhus Universitet/Cordula Vesper - Sunlight material for Nanna/condition_check/trapholt_condition_check_nanna.rda")
+
+#Merging stroke information
+df <- merge(df,test)
+
+#Cleaning variables
+df <- df %>% mutate_if(is.character,as.factor)
+
+```
+
+
+
+#Participant info
+```{r}
+summary(trap$age)
+summary(trap$gender)
+summary(as.factor(trap$used_hand))
+summary(trap$dance_experience)
+summary(trap$know_each_other)
+```
+
+
+
+#Exploring movement on x
+
+```{r}
+#For the whole experiment!
+summary(df$x) #mean = -0.032 
+sd(df$x) #sd = 0.25
+
+#Checking distribution
+ggplot(df, aes(x=x)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.05, 
+                 fill="white",colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df$x, na.rm= TRUE), 
+                                         sd = sd(df$x, na.rm = TRUE)), 
+                colour= "red", size = 1) + ggtitle("Distribution of x") 
+
+#?sampledf?
+qplot(sample=df$x) + xlab("Expected value") + ylab("Observed v
+alue") + stat_qq()+stat_qq_line(colour='red')
+
+#Testing normality with Anderson-Darling normality test
+pacman::p_load(nortest)
+ad.test(df$x)
+
+#is normally distributed
+
+#rescaling for plotting
+df <- df %>%
+  mutate(
+    x_1 = (x*-1)
+  )
+
+#Mean of x in each part
+ggplot(df, aes(x=part, y=x_1, fill = part)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_startrek() + 
+  theme_classic()
+#looks interesting, we should rescale the data to make better sense of it. Seems like part 3 stays more towards the middle and part 2 is lower on the canvas. 
+
+#Linear model of x
+ggplot(df, aes(x=t, y=x_1, color = part)) + 
+  geom_smooth(method = lm) + 
+  scale_color_startrek() + 
+  theme_classic() 
+#part 2 is very steady about staying in the same x position, wheras part 1 and 3 seem to move downwards.
+
+```
+
+```{r}
+#linear model on x to compare mean across parts
+
+xmod <- lm(x~part, data=df)
+summary(xmod)
+#shows high significance between all parts
+```
+We want to explore the difference between the 3 parts of the experience
+
+So we subset the 3 parts 
+- P1: Free drawing 
+- P2: Draw/move together 
+- P3: Free drawing
+
+```{r}
+d_1 <- df %>%
+  filter(part=="1")
+d_2 <- df %>%
+  filter(part=="2")
+d_3 <- df %>%
+  filter(part=="3")
+```
+
+
+Visualizing movement on the x axis for each part
+```{r}
+#part 1
+ggplot(d_1, aes(t,x, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 1 - free drawing")  
+
+#part 2
+ggplot(d_2, aes(t,x, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 2 - draw /move together")
+
+#part 3
+ggplot(d_3, aes(t,x, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 3 - free drawing") 
+
+#some synchronizing is already visible here. There is a difference from part 1 to part 2. See fx part 12 or 17, 19, 22, 31. 
+
+```
+
+How far does the participants move on the canvas?
+
+Range of x
+```{r}
+
+range(d_1$x) #-0.7972223  0.8833334 #seems to reach the limit of the canvas?
+range(d_2$x) #-0.7986111  0.8833334
+range(d_3$x) #-0.7986111  0.8486112
+
+```
+
+Comparing range of x
+```{r}
+#Finding Minimum position in x for each participant
+d_minx <- df %>% 
+    group_by(subj) %>% 
+    slice(which.min(x))
+
+#Renaming x to xMin
+d_minx <- d_minx %>%
+  rename(
+    "xMin" =x
+  )
+
+#Finding Maximum position in x for each participant
+d_maxx <- df %>% 
+    group_by(subj) %>% 
+    slice(which.max(x))
+
+d_maxx <- d_maxx %>%
+  rename(
+    "xMax" =x
+  )
+
+#Merging dataframes
+d_xrange <- merge(data.frame(d_maxx),data.frame(d_minx), by = "subj")
+
+#Calculating range
+d_xrange <- d_xrange %>%
+  mutate(
+    xrange = xMax-xMin
+  )
+
+
+xranmod <- lm(xrange ~ part.x, data = d_xrange)
+summary(xranmod)
+
+
+ggplot(d_xrange, aes(part.x,xrange, fill=part.x)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) +  
+  ggtitle("Range of x in each part")  + 
+  scale_fill_startrek() + 
+  theme_classic()
+
+#No significant effect on range of x between parts
+
+xranmodcond <- lm(xrange ~ cond_label.x, data = d_xrange)
+summary(xranmodcond)
+confint(xranmodcond, oldNames = FALSE)
+
+ggplot(d_xrange, aes(cond_label.x,xrange, fill=cond_label.x)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  ggtitle("A) Range of x in each condition")  + 
+  scale_fill_futurama(name="Condition") + 
+  theme_classic() + 
+  theme(axis.title.x = element_blank(),
+        axis.text.x=element_blank())
+
+
+```
+
+##Exploring y
+```{r}
+#For the whole experiment!
+summary(df$y) #mean = 0.068
+sd(df$y) #sd =0.12
+
+#Checking distribution
+ggplot(df, aes(x=y)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.05, fill="white",colour="black" ) +
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df$x, na.rm= TRUE), 
+                            sd = sd(df$x, na.rm = TRUE)), 
+                colour= "red", size = 1) + 
+  ggtitle("Distribution of y") 
+#normally distributed, but a bit skewed!
+
+#?sampledf?
+qplot(sample=df$y) + xlab("Expected value") + ylab("Observed v
+alue") + stat_qq()+stat_qq_line(colour='red')
+
+#Testing normality with Anderson-Darling normality test
+#pacman::p_load(nortest)
+ad.test(df$y) 
+
+#seems to be okay
+
+#Mean of y in each part
+ggplot(df, aes(x=part, y=y, fill = part)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_startrek() + 
+  theme_classic()
+#higher mean in part 2
+
+#Linear model of y
+ggplot(df, aes(x=t, y=y, color = part)) + 
+  geom_smooth(method = lm) + 
+  scale_color_startrek() + 
+  theme_classic() 
+#part 2 is very steady about staying in the same x position, wheras part 1 and 3 seem to move downwards.
+
+```
+
+```{r}
+#linear model on y to compare mean across parts
+
+ymod <- lm(y~part, data=df)
+summary(ymod)
+#shows high significance between all parts
+```
+
+
+Visualizing movement on the y axis for each part
+```{r}
+#part 1
+ggplot(d_1, aes(t,y, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 1 - free drawing")
+
+#part 2
+ggplot(d_2, aes(t,y, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 2 - draw /move together")
+
+#part 3
+ggplot(d_3, aes(t,y, color = subj)) + 
+  geom_line() +
+  facet_wrap(~pair) + 
+  ggtitle("part 3 - free drawing")
+
+
+#This is a bit more messy, but some synchronisation is also visible here
+```
+
+Range of y
+```{r}
+
+range(d_1$y) #-0.3583333  0.3986111
+range(d_2$y) #-0.3513889  0.3986111
+range(d_3$y) #-0.3291667  0.3986111
+
+```
+
+Comparing range of y
+```{r}
+#Finding Minimum position in x for each participant
+d_miny <- df %>% 
+    group_by(subj) %>% 
+    slice(which.min(y))
+
+#Renaming y to xMin
+d_miny <- d_miny %>%
+  rename(
+    "yMin" =y
+  )
+
+#Finding Maximum position in y for each participant
+d_maxy <- df %>% 
+    group_by(subj) %>% 
+    slice(which.max(y))
+
+d_maxy <- d_maxy %>%
+  rename(
+    "yMax" =y
+  )
+
+#Merging dataframes
+d_yrange <- merge(data.frame(d_maxy),data.frame(d_miny), by = "subj")
+
+#Calculating range
+d_yrange <- d_yrange %>%
+  mutate(
+    yrange = yMax-yMin
+  )
+
+
+yranmod <- lm(yrange ~ part.y, data = d_yrange)
+summary(yranmod)
+
+
+ggplot(d_yrange, aes(part.y,yrange, fill=part.y)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) +  
+  ggtitle("Range of y in each part")  + 
+  scale_fill_startrek() + 
+  theme_classic()
+
+#No significant effect on range of y between parts
+
+yranmodcond <- lm(yrange ~ cond_label.y, data = d_yrange)
+summary(xranmodcond)
+confint(yranmodcond, oldNames = FALSE)
+
+
+
+ggplot(d_yrange, aes(cond_label.y,yrange, fill=cond_label.y)) +
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  ggtitle("b) Range of y in each Condition")  + 
+  scale_fill_futurama(name = "Conditon") + 
+  theme_classic() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x=element_blank())
+  
+
+```
+
+
+#Heatmapping
+```{r}
+#Parts        
+ggplot(df, aes(x=y, y=x)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon") + 
+  facet_wrap(~part) + 
+  ggtitle("A) Movement across all 3 parts") + 
+  scale_fill_viridis_c(option = "plasma") + 
+  theme_minimal()
+
+
+#Conditions
+ggplot(d_2, aes(x=y, y=x)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon") +
+  facet_wrap(~cond_label) + 
+  ggtitle("B) Movement across conditions") + 
+  scale_fill_viridis_c(option = "plasma") +
+  theme_minimal()
+
+```
+
+#Distance in space between individual pairs
+
+```{r}
+#Creating a wide dataframe
+  #selecting only relevant variables
+dfwide <- df %>%
+  select(
+    pair,
+    cond_label,
+    subj,
+    part,
+    t,
+    x,
+    y,
+    v
+  )
+
+#Finding participant 1 and 2
+dfwide <- dfwide %>%
+  mutate(
+    subjnum = str_replace(subj, "\\d{3}", "")
+  )
+
+dfwide <- dfwide %>%
+  mutate(
+    subjnum = as.factor(subjnum)
+  )
+
+dfwide <- dfwide %>%
+  select(-subj)
+
+
+#pivoting data so we get two columns for each variable for subject 1 and subject 2 separately
+dfwide <- dfwide %>%
+  pivot_wider(names_from = subjnum, values_from = c(x,y,v))
+
+
+```
+
+#Calculating differences on the two axes
+
+Parts
+```{r}
+#calculating difference in space between subject 1 and 2
+dfwide <- dfwide%>%
+  mutate(
+    x_dif = x_1-x_2,
+    y_dif = y_1-y_2
+  )
+
+#absolute numbers
+dfwide <- dfwide%>%
+  mutate(
+    x_dif_abs = abs(x_dif),
+    y_dif_abs = abs(y_dif)
+  )
+
+#Difference in part for x
+ggplot(dfwide, aes(x=part, y= x_dif_abs, fill = part)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_futurama() + 
+  theme_minimal() + 
+  ggtitle("Difference in x between subjects in parts") + 
+  ylim(0,0.3)
+
+x_dif_mod <- lm(x_dif_abs ~ part, data = dfwide)
+summary(x_dif_mod)
+
+#Difference in part for y
+ggplot(dfwide, aes(x=part, y= y_dif_abs, fill = part)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_futurama() + 
+  theme_minimal() + 
+  ggtitle("Difference in y between subjects in parts") + 
+  ylim(0,0.3)
+
+y_dif_mod <- lm(y_dif_abs ~ part, data = dfwide)
+summary(y_dif_mod)
+
+
+```
+
+
+Conditions
+```{r}
+#Separating df wide with only part 2 data
+
+dfwide2 <- dfwide %>%
+  filter(
+    part =="2")
+
+
+#Difference in condition for x
+ggplot(dfwide2, aes(x=cond_label, y= x_dif_abs, fill = cond_label)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_futurama() + 
+  theme_minimal() + 
+  ggtitle("Difference in x between subjects in conditions") + 
+  ylim(0,0.3)
+
+x_dif_cond_mod <- lm(x_dif_abs ~ cond_label, data = dfwide2)
+summary(x_dif_cond_mod)
+
+#Difference in condition for y
+ggplot(dfwide2, aes(x=cond_label, y= y_dif_abs, fill = cond_label)) + 
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5) + 
+  scale_fill_futurama() + 
+  theme_minimal() + 
+  ggtitle("Difference in y between subjects in conditions") + 
+  ylim(0,0.3)
+
+
+y_dif_cond_mod <- lm(y_dif_abs ~ cond_label, data = dfwide2)
+summary(x_dif_mod)
+
+```
+
+
+#Absolute distance in space between participants 
+```{r}
+#calculating distance
+dfwide <- dfwide %>%
+  mutate(
+    dist = abs(sqrt(((x_2-x_1)^2) - ((y_2-y_1)^2)))
+    )
+
+#Checking distribution
+ggplot(dfwide, aes(x=dist)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.05, 
+                 fill="white",
+                 colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(dfwide$dist, na.rm= TRUE), 
+                                         sd = sd(dfwide$dist, na.rm = TRUE)), 
+                colour= "#E69F00", size = 1) + 
+  theme_minimal() + 
+  ggtitle("Distribution of distance")
+
+#plotting quantiles 
+qplot(sample=dfwide$dist) + xlab("Expected value") + ylab("Observed value") + stat_qq()+stat_qq_line(colour="#E69F00") + theme_minimal()
+
+#Testing normality with Anderson-Darling normality test
+#pacman::p_load(nortest)
+ad.test(dfwide$dist)
+#Not normal, so we transform with sqrt
+
+dfwide <- dfwide %>%
+  mutate(
+    dist_sqrt = sqrt(dist)
+  )
+
+
+ggplot(dfwide, aes(x=dist_sqrt)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.05, 
+                 fill="white",
+                 colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(dfwide$dist_sqrt, na.rm= TRUE), 
+                                         sd = sd(dfwide$dist_sqrt, na.rm = TRUE)), 
+                colour= "#E69F00", size = 1) + 
+  theme_minimal() + 
+  ggtitle("Distribution of distance")
+```
+
+
+Modelling
+```{r}
+dfwide %>%
+  group_by(part) %>%
+  get_summary_stats(dist, type = "mean_sd")
+
+
+distmpart1 <- lmerTest::lmer(dist_sqrt~part*cond_label + (1|pair), data = dfwide)
+summary(distmpart1)
+anova(distmpart1)
+plot(distmpart1)
+qqnorm(resid(distmpart1))
+confint(distmpart1, oldNames = FALSE)
+
+#R squared
+MuMIn::r.squaredGLMM(distmpart1)
+
+ggplot(dfwide, aes(part, dist, fill=part)) +
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5)+ 
+  facet_wrap(~cond_label)+
+  ggtitle("Absolute distance between individual pairs") + 
+  scale_fill_futurama() + 
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x=element_blank())
+
+```
+
+
+
+##Explore v
+```{r}
+#Checking distribution
+ggplot(df, aes(x=v)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.0002, 
+                 fill="white",
+                 colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df$v, na.rm= TRUE), 
+                                         sd = sd(df$v, na.rm = TRUE)), 
+                colour= "#E69F00", size = 1) + 
+  theme_minimal() + 
+  ggtitle("Distribution of v") 
+
+#not normally distributed
+
+#plotting quantiles 
+qplot(sample=df$v) + xlab("Expected value") + ylab("Observed value") + stat_qq()+stat_qq_line(colour="#E69F00") + theme_minimal()
+
+#Testing normality with Anderson-Darling normality test
+#pacman::p_load(nortest)
+ad.test(df$v)
+
+#significant departure from normality was found 
+
+#logtransforming v
+
+df <- df %>%
+  mutate(
+    v_log = log(v),
+    v_sqrt = sqrt(v)
+  )
+#log hist
+ggplot(df, aes(x=v_log)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.0002, 
+                 fill="white",
+                 colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df$v_log, na.rm= TRUE), 
+                                         sd = sd(df$v_log, na.rm = TRUE)), 
+                colour= "#E69F00", size = 1) + 
+  theme_minimal() + 
+  ggtitle("Distribution of v log")
+
+#sqrt hist
+ggplot(df, aes(x=v_sqrt)) + 
+  geom_histogram(aes(y=..density..),
+                 binwidth = 0.0002, 
+                 fill="white",
+                 colour="black" ) + 
+  stat_function(fun = dnorm, 
+                args = list(mean = mean(df$v_sqrt, na.rm= TRUE), 
+                                         sd = sd(df$v_sqrt, na.rm = TRUE)), 
+                colour= "#E69F00", size = 1) + 
+  theme_minimal() + 
+  ggtitle("Distribution of v sqrt")
+
+#plotting quantiles 
+qplot(sample=df$v_sqrt) + xlab("Expected value") + ylab("Observed value") + stat_qq()+stat_qq_line(colour="#E69F00") + theme_minimal()
+
+#Testing normality with Anderson-Darling normality test
+#pacman::p_load(nortest)
+ad.test(df$v_sqrt)
+
+
+#log did not fix but sqrt did transform v to a normal distribution
+
+```
+
+
+
+Modeling
+```{r}
+
+vm1_2 <- lmerTest::lmer(v_sqrt ~ t*part*cond_label +(1|pair), data = df)
+summary(vm1_2)
+anova(vm1_2)
+MuMIn::r.squaredGLMM(vm1_2)
+confint(vm1_2, oldNames = FALSE)
+plot(vm1_2)
+qqnorm(residuals(vm1_2))
+
+difflsmeans(vm1_2)
+Anova(vm1_2)
+
+
+
+ggplot(df, aes(x=t, y=v, color = part)) + 
+  geom_smooth(method = lm) +
+  facet_wrap(~cond_label) +
+  ggtitle("Absolute distance between pairs through time")+
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(df, aes(cond_label, v, fill=cond_label)) +
+  geom_bar(stat='summary', fun.y=mean) + 
+  geom_errorbar(stat='summary', fun.data=mean_se, width=0.5)+ 
+  scale_fill_futurama() + 
+  theme_minimal() +
+  theme(axis.title.x = element_blank(),
+        axis.text.x=element_blank())
+```
+
+
+
+#individual patterns
+
+```{r}
+d_2 <- df %>%
+  filter(part=="2")
+
+#all movement on x
+ggplot(d_2, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  theme_minimal() +
+  facet_wrap(~pair)
+
+#pair 12 - move - >70 - m/f - right hand - long-term
+pair12 <- d_2 %>%
+  filter(pair=="12")
+
+ggplot(pair12, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(pair12, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+#part 2 by minutes
+pair12_1 <- pair12 %>%
+  filter(t < 60000)
+pair12_2 <- pair12 %>%
+  filter(t > 60000, t < 120000)
+pair12_3 <- pair12 %>%
+  filter(t > 120000)
+
+ggplot(pair12_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair12_2, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair12_3, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+pair12_3_1 <- pair12 %>%
+  filter(t > 110000, t < 115000)
+
+ggplot(pair12_3_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair12_3_1, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+
+```
+
+
+```{r}
+#pair 31 - draw - <20/40-49 - m/f - right hand - long-term
+pair31 <- d_2 %>%
+  filter(pair=="31")
+
+ggplot(pair31, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(pair31, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+#part 2 by minutes
+pair31_1 <- pair31 %>%
+  filter(t < 60000)
+pair31_2 <- pair31 %>%
+  filter(t > 60000, t < 120000)
+pair31_3 <- pair31 %>%
+  filter(t > 120000)
+
+ggplot(pair31_1, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair31_2, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair31_3, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair31_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair31_2, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair31_3, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+#Heatmap
+ggplot(pair31_2, aes(x=y, y=x)) +
+  stat_density_2d(aes(fill = ..level..), geom = "polygon") +
+  facet_wrap(~subj) + 
+  ggtitle("Pair 31") + 
+  scale_fill_viridis_c(option = "plasma") +
+  theme_minimal()
+
+```
+
+
+```{r}
+#pair 19 - draw - 40-49 - m/f - both hands - never
+pair19 <- d_2 %>%
+  filter(pair=="19")
+
+ggplot(pair19, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(pair19, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+#part 2 by minutes
+pair19_1 <- pair19 %>%
+  filter(t < 60000)
+pair19_2 <- pair19 %>%
+  filter(t > 60000, t < 120000)
+pair19_3 <- pair19 %>%
+  filter(t > 120000)
+
+#x and y
+ggplot(pair19_1, aes(x=y, y=x, color = subj)) + 
+  geom_point() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_1, aes(x=y, y=x, color = t)) + 
+  geom_point() + 
+  scale_color_viridis_c(option = "plasma") + 
+  theme_minimal() +
+  facet_wrap(~subj)
+
+#x and time
+ggplot(pair19_1, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_2, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_3, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_2, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair19_3, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+```
+
+```{r}
+#pair 26
+pair26 <- d_2 %>%
+  filter(pair=="26")
+
+ggplot(pair26, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(pair26, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+#part 2 by minutes
+pair26_1 <- pair26 %>%
+  filter(t < 60000)
+pair26_2 <- pair26 %>%
+  filter(t > 60000, t < 120000)
+pair26_3 <- pair26 %>%
+  filter(t > 120000)
+
+ggplot(pair26_1, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair26_2, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair26_3, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair26_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair26_2, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair26_3, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+```
+
+```{r}
+#pair 14 
+pair14 <- d_2 %>%
+  filter(pair=="14")
+
+ggplot(pair14, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+ggplot(pair14, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+
+#part 2 by minutes
+pair14_1 <- pair14 %>%
+  filter(t < 60000)
+pair14_2 <- pair14 %>%
+  filter(t > 60000, t < 120000)
+pair14_3 <- pair14 %>%
+  filter(t > 120000)
+
+ggplot(pair14_1, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_2, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_3, aes(x=t, y=x, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_2, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_3, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+pair14_1_1 <- pair14 %>%
+  filter(t > 45000, t < 60000)
+
+ggplot(pair14_1_1, aes(x=t, y=y, color = subj)) + 
+  geom_line() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_1_1, aes(x=y, y=x, color = subj)) + 
+  geom_point() + 
+  scale_color_futurama() + 
+  theme_minimal()
+
+ggplot(pair14_1_1, aes(x=y, y=x, color = t)) + 
+  geom_point() + 
+  scale_color_viridis_c(option = "plasma") + 
+  theme_minimal() +
+  facet_wrap(~subj)
+
+```
+
+
+
+
